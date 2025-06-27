@@ -298,7 +298,7 @@ SQInteger Script_CreateFakeClient(HSQUIRRELVM v)
 		return 1;
 	}
 
-	// Use existing bot creation system from load.cpp
+	// Use the same approach as AddBotDummyConCommand
 	HMODULE serverModule = GetModuleHandleA("server.dll");
 	if (!serverModule)
 	{
@@ -322,8 +322,15 @@ SQInteger Script_CreateFakeClient(HSQUIRRELVM v)
 		return 1;
 	}
 
+	// Set default team (can be changed later with SetBotTeam)
+	isCreatingBot = true;
+	botTeamIndex = 3; // Default to Militia
+
 	// Create the bot
 	__int64 pBot = pBotManager->CreateBot(botName);
+	
+	isCreatingBot = false;
+
 	if (!pBot)
 	{
 		sq_pushnull(v);
@@ -335,7 +342,19 @@ SQInteger Script_CreateFakeClient(HSQUIRRELVM v)
 	ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
 	CServerGameClients_ClientFullyConnected(0, pBot);
 
-	// Return bot entity to Squirrel
+	// Return bot entity to Squirrel - convert to player index
+	// Find the player index for this entity
+	for (int i = 0; i < 64; i++) // Max 64 players
+	{
+		void* player = (void*)(G_server + 0x12A53F90 + (i * 0x2D728)); // Player array offset
+		if (player == (void*)pBot)
+		{
+			sq_pushinteger(v, i);
+			return 1;
+		}
+	}
+
+	// If we can't find the index, return the entity handle
 	sq_pushinteger(v, pBot);
 	return 1;
 }
