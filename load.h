@@ -111,6 +111,19 @@ extern uintptr_t G_client;
 extern uintptr_t G_matsystem;
 extern uintptr_t G_localize;
 extern ILocalize* G_localizeIface;
+
+// Bot management system declarations
+class CPluginBotManager
+{
+public:
+	virtual void* GetBotController(uint16_t* pEdict);
+	virtual __int64 CreateBot(const char* botname);
+};
+
+extern bool isCreatingBot;
+extern int botTeamIndex;
+extern int g_botCounter;
+extern __int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptr, unsigned int index);
 static bool(__fastcall* o_pCLocalise__AddFile)(void* pVguiLocalize, const char* path, const char* pathId, bool bIncludeFallbackSearchPaths);
 
 static inline std::string G_public_ip;

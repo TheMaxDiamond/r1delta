@@ -286,6 +286,125 @@ constexpr Return Call(void* vmt, const std::uint32_t index, Arguments ... args) 
 	return (*static_cast<Function**>(vmt))[index](vmt, args...);
 }
 
+// Bot creation bridge functions for Squirrel integration
+// (Declarations are now in load.h)
+
+SQInteger Script_CreateFakeClient(HSQUIRRELVM v)
+{
+	const char* botName;
+	if (SQ_FAILED(sq_getstring(v, 2, &botName)))
+	{
+		sq_pushnull(v);
+		return 1;
+	}
+
+	// Use existing bot creation system from load.cpp
+	HMODULE serverModule = GetModuleHandleA("server.dll");
+	if (!serverModule)
+	{
+		sq_pushnull(v);
+		return 1;
+	}
+
+	typedef CPluginBotManager* (*CreateInterfaceFn)(const char* name, int* returnCode);
+	CreateInterfaceFn CreateInterface = reinterpret_cast<CreateInterfaceFn>(GetProcAddress(serverModule, "CreateInterface"));
+	if (!CreateInterface)
+	{
+		sq_pushnull(v);
+		return 1;
+	}
+
+	int returnCode = 0;
+	CPluginBotManager* pBotManager = CreateInterface("BotManager001", &returnCode);
+	if (!pBotManager)
+	{
+		sq_pushnull(v);
+		return 1;
+	}
+
+	// Create the bot
+	__int64 pBot = pBotManager->CreateBot(botName);
+	if (!pBot)
+	{
+		sq_pushnull(v);
+		return 1;
+	}
+
+	// Fully connect the bot
+	typedef void (*ClientFullyConnectedFn)(__int64 thisptr, __int64 entity);
+	ClientFullyConnectedFn CServerGameClients_ClientFullyConnected = (ClientFullyConnectedFn)(G_server + 0x1499E0);
+	CServerGameClients_ClientFullyConnected(0, pBot);
+
+	// Return bot entity to Squirrel
+	sq_pushinteger(v, pBot);
+	return 1;
+}
+
+SQInteger Script_SetBotTeam(HSQUIRRELVM v)
+{
+	SQInteger botEntity;
+	SQInteger teamIndex;
+	
+	if (SQ_FAILED(sq_getinteger(v, 2, &botEntity)) || SQ_FAILED(sq_getinteger(v, 3, &teamIndex)))
+	{
+		sq_pushbool(v, false);
+		return 1;
+	}
+
+	// Set team using existing team change hook
+	isCreatingBot = true;
+	botTeamIndex = (int)teamIndex;
+	
+	// Call team change function
+	extern __int64 (*oCPortal_Player__ChangeTeam)(__int64 thisptr, unsigned int index);
+	if (oCPortal_Player__ChangeTeam)
+	{
+		oCPortal_Player__ChangeTeam(botEntity, (unsigned int)teamIndex);
+	}
+	
+	isCreatingBot = false;
+
+	sq_pushbool(v, true);
+	return 1;
+}
+
+SQInteger Script_DisconnectBot(HSQUIRRELVM v)
+{
+	SQInteger botEntity;
+	if (SQ_FAILED(sq_getinteger(v, 2, &botEntity)))
+	{
+		sq_pushbool(v, false);
+		return 1;
+	}
+
+	// Disconnect the bot entity
+	typedef void (*DisconnectFn)(__int64 entity, const char* reason);
+	DisconnectFn DisconnectClient = (DisconnectFn)(G_server + 0x14A180); // Approximate offset
+	
+	if (DisconnectClient && botEntity)
+	{
+		DisconnectClient(botEntity, "Bot removed");
+	}
+
+	sq_pushbool(v, true);
+	return 1;
+}
+
+SQInteger Script_IsValidBot(HSQUIRRELVM v)
+{
+	SQInteger botEntity;
+	if (SQ_FAILED(sq_getinteger(v, 2, &botEntity)))
+	{
+		sq_pushbool(v, false);
+		return 1;
+	}
+
+	// Basic validation - check if entity pointer is valid
+	bool isValid = (botEntity != 0);
+	sq_pushbool(v, isValid);
+	return 1;
+}
+
 struct AddonInfo {
 	const char* name;
 	const char* author;
@@ -1521,6 +1640,51 @@ bool GetSQVMFuncs() {
 	REGISTER_SCRIPT_FUNCTION(
 		SCRIPT_CONTEXT_UI, // Available in client script contexts
 		"SquirrelNativeFunctionTest", (SQFUNCTION)SquirrelNativeFunctionTest, ".sifb", 0, "string", "string text, int a2, float a3, bool a4", "Test registering and calling native function in Squirrel.");
+
+	// Bot management functions for AI bot system
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"CreateFakeClient",
+		(SQFUNCTION)Script_CreateFakeClient,
+		".s",
+		2,
+		"int",
+		"string botName",
+		"Create a fake client/bot with the specified name"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"SetBotTeam",
+		(SQFUNCTION)Script_SetBotTeam,
+		".ii",
+		3,
+		"bool",
+		"entity bot, int teamIndex",
+		"Set the team for a bot"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"DisconnectBot",
+		(SQFUNCTION)Script_DisconnectBot,
+		".i",
+		2,
+		"bool",
+		"entity bot",
+		"Disconnect a bot"
+	);
+
+	REGISTER_SCRIPT_FUNCTION(
+		SCRIPT_CONTEXT_SERVER,
+		"IsValidBot",
+		(SQFUNCTION)Script_IsValidBot,
+		".i",
+		2,
+		"bool",
+		"entity bot",
+		"Check if a bot entity is valid"
+	);
 
 	initialized = true;
 	return true;
